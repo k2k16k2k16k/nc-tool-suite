@@ -36,6 +36,18 @@
   </div>
 </nav>
 
+
+  <!-- 自己更新バー -->
+  <div id="update-bar" style="background:var(--bg1);border-bottom:1px solid var(--border);padding:8px 20px;display:flex;align-items:center;gap:12px;font-size:13px">
+    <span style="color:var(--text2)">⚙ NC Tool Suite</span>
+    <span id="current-ver" style="font-family:var(--mono);font-size:12px;color:var(--text3)">v3.1.0</span>
+    <span id="update-status" style="color:var(--text3);font-size:12px"></span>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-sm" onclick="checkUpdate()" id="check-btn">🔄 更新確認</button>
+      <button class="btn btn-sm btn-primary" onclick="doUpdate()" id="update-btn" style="display:none">⬆ 更新する</button>
+    </div>
+  </div>
+
 <div class="page">
   <div class="hero">
     <div class="hero-icon">⚙</div>
@@ -121,5 +133,142 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 </script>
+
+<script>
+const REPO_RAW = 'https://raw.githubusercontent.com/k2k16k2k16k/nc-tool-suite/main';
+const CURRENT_VERSION = '3.1.0';
+let latestInfo = null;
+
+async function checkUpdate() {
+  const btn = document.getElementById('check-btn');
+  const status = document.getElementById('update-status');
+  btn.textContent = '確認中...';
+  btn.disabled = true;
+  status.textContent = '';
+
+  try {
+    const res = await fetch(REPO_RAW + '/version.json?t=' + Date.now());
+    if (!res.ok) throw new Error('取得失敗');
+    latestInfo = await res.json();
+    const latest = latestInfo.version;
+
+    if (latest === CURRENT_VERSION) {
+      status.textContent = '✅ 最新版です';
+      status.style.color = 'var(--green)';
+    } else {
+      status.innerHTML = `🆕 新バージョン <strong>${latest}</strong> があります`;
+      status.style.color = 'var(--accent)';
+      document.getElementById('update-btn').style.display = 'inline-flex';
+    }
+  } catch(e) {
+    status.textContent = '⚠ 確認できませんでした（オフライン？）';
+    status.style.color = 'var(--amber)';
+  }
+  btn.textContent = '🔄 更新確認';
+  btn.disabled = false;
+}
+
+async function doUpdate() {
+  if (!latestInfo) return;
+  const btn = document.getElementById('update-btn');
+  btn.textContent = '更新中...';
+  btn.disabled = true;
+
+  const files = Object.keys(latestInfo.files);
+  const results = [];
+  let success = 0, fail = 0;
+
+  for (const file of files) {
+    try {
+      const res = await fetch(REPO_RAW + '/' + file + '?t=' + Date.now());
+      if (!res.ok) throw new Error();
+      const text = await res.text();
+
+      // ダウンロードリンクを生成
+      const blob = new Blob([text], {type: 'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.split('/').pop();
+      // 自動ダウンロードは1ファイルずつ
+      results.push({file, url, a, text});
+      success++;
+    } catch(e) {
+      fail++;
+    }
+  }
+
+  // 更新確認ダイアログを表示
+  showUpdateDialog(results, latestInfo);
+  btn.textContent = '⬆ 更新する';
+  btn.disabled = false;
+}
+
+function showUpdateDialog(results, info) {
+  const existing = document.getElementById('update-dialog');
+  if (existing) existing.remove();
+
+  const changelog = (info.changelog || []).slice(0, 3).map(c =>
+    `<li style="margin-bottom:4px;font-size:12px;color:var(--text2)">${c}</li>`
+  ).join('');
+
+  const dialog = document.createElement('div');
+  dialog.id = 'update-dialog';
+  dialog.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  dialog.innerHTML = `
+    <div style="background:var(--bg1);border-radius:12px;padding:24px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="font-size:16px;font-weight:700;margin-bottom:6px">🆕 バージョン ${info.version} に更新</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">${info.updated}</div>
+      <ul style="margin-bottom:16px;padding-left:16px">${changelog}</ul>
+      <div style="background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.8">
+        📁 更新ファイル: <strong style="color:var(--text)">${results.length}個</strong><br>
+        以下のファイルがダウンロードされます。<br>
+        <code style="font-size:11px;color:var(--accent)">C:\Users\chp2\Desktop\コード作成\</code> に上書きしてください。
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="file-list">
+        ${results.map(r => `<span style="font-size:11px;background:var(--accent-l);color:var(--accent);padding:2px 8px;border-radius:4px">${r.file}</span>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('update-dialog').remove()" style="padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:var(--bg1);cursor:pointer;font-family:var(--sans);font-size:13px">キャンセル</button>
+        <button onclick="downloadAll()" id="dl-all-btn" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-family:var(--sans);font-size:13px">⬇ 全ファイルをダウンロード</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+
+  // グローバルに結果を保持
+  window._updateResults = results;
+}
+
+async function downloadAll() {
+  const results = window._updateResults || [];
+  const btn = document.getElementById('dl-all-btn');
+  btn.textContent = 'ダウンロード中...';
+  btn.disabled = true;
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    await new Promise(resolve => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = r.url;
+        a.download = r.file.split('/').pop();
+        a.click();
+        resolve();
+      }, i * 300); // 300ms間隔でダウンロード
+    });
+  }
+
+  btn.textContent = '✅ ダウンロード完了';
+  setTimeout(() => {
+    document.getElementById('update-dialog').remove();
+    const status = document.getElementById('update-status');
+    status.textContent = '📁 ダウンロード完了 — フォルダに上書きしてください';
+    status.style.color = 'var(--green)';
+    document.getElementById('update-btn').style.display = 'none';
+  }, 1000);
+}
+</script>
+
 </body>
 </html>
