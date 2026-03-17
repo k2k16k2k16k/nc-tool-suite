@@ -106,6 +106,7 @@
     <button class="proc-tab" onclick="switchProc('keyway',this)">キー溝</button>
     <button class="proc-tab" onclick="switchProc('mill',this)">フライス</button>
     <button class="proc-tab" onclick="switchProc('taper',this)">テーパー・R</button>
+    <button class="proc-tab" onclick="switchProc('face',this)">端面仕上げ</button>
   </div>
 
   <div class="form-body">
@@ -267,6 +268,24 @@
       </div>
       <button class="btn btn-primary btn-full" onclick="generate('taper')">▶ Gコード生成</button>
     </div>
+
+    <!-- 端面仕上げ -->
+    <div id="proc-face" class="tab-panel" style="display:none">
+      <div class="card-title">端面仕上げ</div>
+      <div class="grid-2">
+        <div class="field"><label>素材径 (mm)</label><input type="number" id="fc-d" placeholder="50"></div>
+        <div class="field"><label>総取り代 (mm)</label><input type="number" id="fc-stock" placeholder="1" step="0.1"></div>
+        <div class="field"><label>粗削り切込み (mm)</label><input type="number" id="fc-depth" placeholder="0.5" step="0.1"></div>
+        <div class="field"><label>仕上げ取り代 (mm)</label><input type="number" id="fc-fin" placeholder="0.1" step="0.05"></div>
+      </div>
+      <div class="card-title" style="margin-top:12px">切削条件 <span class="auto-badge" id="badge-fc" style="display:none">AUTO</span></div>
+      <div class="grid-2">
+        <div class="field"><label>回転数 (rpm)</label><input type="number" id="fc-rpm" placeholder="1000"></div>
+        <div class="field"><label>粗削り送り (mm/rev)</label><input type="number" id="fc-feed" placeholder="0.2" step="0.01"></div>
+        <div class="field"><label>仕上げ送り (mm/rev)</label><input type="number" id="fc-ffeed" placeholder="0.08" step="0.01"></div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="generate('face')">▶ Gコード生成</button>
+    </div>
   </div>
 </div>
 
@@ -300,7 +319,7 @@
 <script>
 let lastGcode = '';
 let currentProc = 'od';
-const PROC_NAMES = {od:'外径旋削',id:'内径ボーリング',thread:'ねじ切り',groove:'溝入れ・突切り',drill:'横穴ドリル',keyway:'キー溝',mill:'フライス',taper:'テーパー・R'};
+const PROC_NAMES = {od:'外径旋削',id:'内径ボーリング',thread:'ねじ切り',groove:'溝入れ・突切り',drill:'横穴ドリル',keyway:'キー溝',mill:'フライス',taper:'テーパー・R',face:'端面仕上げ'};
 
 function v(id){ return (document.getElementById(id)||{}).value||''; }
 function fv(id,d){ return parseFloat(v(id))||d; }
@@ -359,7 +378,7 @@ function applyAuto() {
 
 // 工具登録と連動
 function loadToolsForProc(proc) {
-  const typeMap={od:'外径',id:'内径',thread:'ねじ切り',groove:'溝入れ',drill:'ドリル',keyway:'エンドミル',mill:'エンドミル',taper:'外径'};
+  const typeMap={od:'外径',id:'内径',thread:'ねじ切り',groove:'溝入れ',drill:'ドリル',keyway:'エンドミル',mill:'エンドミル',taper:'外径',face:'外径'};
   const tools = TOOL_DB.getByType(typeMap[proc]||'');
   const sel = document.getElementById('tool-select');
   sel.innerHTML = '<option value="">— 手動入力 —</option>' +
@@ -386,9 +405,9 @@ function applyTool() {
   // 切削条件を自動計算して反映
   const c = calcConditions(v('mat'), v('toolmat'), parseFloat(t.dia)||25, v('finish'));
   if (c) {
-    const rpmMap   = {od:'od-rpm', id:'id-rpm', thread:'th-rpm', groove:'gr-rpm', drill:'dr-rpm', keyway:'kw-rpm', mill:'ml-rpm', taper:'tp-rpm'};
-    const feedMap  = {od:'od-feed',id:'id-feed', thread:null,     groove:'gr-feed',drill:'dr-feed',keyway:'kw-feed',mill:'ml-feed', taper:'tp-feed'};
-    const apMap    = {od:'od-depth',id:'id-ap',  thread:null,     groove:null,     drill:null,     keyway:null,    mill:'ml-ap',   taper:null};
+    const rpmMap   = {od:'od-rpm', id:'id-rpm', thread:'th-rpm', groove:'gr-rpm', drill:'dr-rpm', keyway:'kw-rpm', mill:'ml-rpm', taper:'tp-rpm', face:'fc-rpm'};
+    const feedMap  = {od:'od-feed',id:'id-feed', thread:null,     groove:'gr-feed',drill:'dr-feed',keyway:'kw-feed',mill:'ml-feed', taper:'tp-feed', face:'fc-feed'};
+    const apMap    = {od:'od-depth',id:'id-ap',  thread:null,     groove:null,     drill:null,     keyway:null,    mill:'ml-ap',   taper:null,      face:'fc-depth'};
     const isMin    = {keyway:true, mill:true};
 
     const rId = rpmMap[currentProc];
@@ -411,7 +430,7 @@ function applyTool() {
   const r = calcRoughness(feedVal, t.noseR || 0.8);
 
   // AUTO バッジ表示
-  const badgeId = {od:'badge-od',id:'badge-id',thread:'badge-th',groove:'badge-gr',drill:'badge-dr',keyway:'badge-kw',mill:'badge-ml',taper:'badge-tp'}[currentProc];
+  const badgeId = {od:'badge-od',id:'badge-id',thread:'badge-th',groove:'badge-gr',drill:'badge-dr',keyway:'badge-kw',mill:'badge-ml',taper:'badge-tp',face:'badge-fc'}[currentProc];
   if (badgeId) document.getElementById(badgeId).style.display = 'inline-block';
 
   onMatChange();
@@ -596,6 +615,26 @@ function generate(proc) {
     gcode=lines.join('\n');
     steps=[{t:'XZ同時補間',d:'G01でX・Z軸同時移動（テーパー）、G03で円弧補間（R面取り）。'},
       {t:'G96周速一定',d:'径変化に追従して切削速度を一定に保ちます。'}];
+  }
+
+  if(proc==='face'){
+    const dia=fv('fc-d',50),stock=fv('fc-stock',1),dep=fv('fc-depth',.5),fin=fv('fc-fin',.1);
+    const rpm=fv('fc-rpm',1000),feed=fv('fc-feed',.2),ffeed=fv('fc-ffeed',.08);
+    const roughStock=stock-fin;
+    const passes=Math.max(1,Math.ceil(roughStock/dep));
+    const lines=[`(端面仕上げ φ${dia}mm 取り代${stock}mm)`,`%`,`O0009`,
+      `G28 U0. W0.`,`G50 S3000`,`G96 S${rpm} M03`,`${toolNo} M08`];
+    for(let i=1;i<=passes;i++){
+      const cz=(stock-dep*i).toFixed(3);
+      lines.push(`G00 X${dia+2}. Z${cz}.`,`G01 X-1. F${feed}`,`G00 Z${stock}.`);
+    }
+    lines.push(`G00 X${dia+2}. Z0.`,`G01 X-1. F${ffeed}`,`G00 X${dia+10}. Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`);
+    gcode=lines.join('\n');
+    steps=[
+      {t:`粗削り ${passes}パス`,d:`取り代${stock}mmのうち仕上げ代${fin}mmを残して粗削り。送り${feed}mm/rev。`},
+      {t:'仕上げパス',d:`送り${ffeed}mm/revに落として平面度・面粗さを確保。X-1まで送り中心を確実に削り切る。`},
+      {t:'G96周速一定',d:'端面加工は径が変化するためG96必須。中心に近づくほど回転数が上がります。'},
+    ];
   }
 
   lastGcode = gcode;
