@@ -119,6 +119,7 @@
     <button class="proc-tab" onclick="switchProc('mill',this)">フライス</button>
     <button class="proc-tab" onclick="switchProc('taper',this)">テーパー・R</button>
     <button class="proc-tab" onclick="switchProc('face',this)">端面仕上げ</button>
+    <button class="proc-tab" style="color:var(--accent);border-color:var(--accent)" onclick="switchProc('auto',this)">⚡ 自動戦略</button>
   </div>
 
   <div class="form-body">
@@ -325,6 +326,20 @@
       </div>
       <button class="btn btn-primary btn-full" onclick="generate('face')">▶ Gコード生成</button>
     </div>
+
+    <!-- 自動加工戦略 -->
+    <div id="proc-auto" class="tab-panel" style="display:none">
+      <div class="card-title">⚡ 自動加工戦略</div>
+      <div class="alert alert-info" style="margin-bottom:12px;font-size:12px">素材径と仕上げ径を入力するだけ。削り代に応じて粗削り・中削り・仕上げを自動判定します。切削条件は上部の素材・工具・ノーズR設定を使用。</div>
+      <div class="grid-2">
+        <div class="field"><label>素材外径 (mm)</label><input type="number" id="auto-blank-d" placeholder="50" oninput="previewStrategy()"></div>
+        <div class="field"><label>仕上げ外径 (mm)</label><input type="number" id="auto-fin-d" placeholder="45" oninput="previewStrategy()"></div>
+        <div class="field"><label>仕上げ長さ (mm)</label><input type="number" id="auto-fin-l" placeholder="80" oninput="previewStrategy()"></div>
+        <div class="field"><label>目標Ra (μm) — 省略可</label><input type="number" id="auto-ra" placeholder="1.6" step="0.4" min="0.1" oninput="previewStrategy()"></div>
+      </div>
+      <div id="auto-preview" style="margin:10px 0"></div>
+      <button class="btn btn-primary btn-full" onclick="generate('auto')">▶ Gコード生成</button>
+    </div>
   </div>
 </div>
 
@@ -358,7 +373,7 @@
 <script>
 let lastGcode = '';
 let currentProc = 'od';
-const PROC_NAMES = {od:'外径旋削',id:'内径ボーリング',thread:'ねじ切り',groove:'溝入れ・突切り',drill:'横穴ドリル',keyway:'キー溝',mill:'フライス',taper:'テーパー・R',face:'端面仕上げ'};
+const PROC_NAMES = {od:'外径旋削',id:'内径ボーリング',thread:'ねじ切り',groove:'溝入れ・突切り',drill:'横穴ドリル',keyway:'キー溝',mill:'フライス',taper:'テーパー・R',face:'端面仕上げ',auto:'自動加工戦略'};
 
 function v(id){ return (document.getElementById(id)||{}).value||''; }
 function fv(id,d){ return parseFloat(v(id))||d; }
@@ -417,7 +432,7 @@ function applyAuto() {
 
 // 工具登録と連動
 function loadToolsForProc(proc) {
-  const typeMap={od:'外径',id:'内径',thread:'ねじ切り',groove:'溝入れ',drill:'ドリル',keyway:'エンドミル',mill:'エンドミル',taper:'外径',face:'外径'};
+  const typeMap={od:'外径',id:'内径',thread:'ねじ切り',groove:'溝入れ',drill:'ドリル',keyway:'エンドミル',mill:'エンドミル',taper:'外径',face:'外径',auto:'外径'};
   const tools = TOOL_DB.getByType(typeMap[proc]||'');
   const sel = document.getElementById('tool-select');
   sel.innerHTML = '<option value="">— 手動入力 —</option>' +
@@ -501,6 +516,84 @@ function applyRaFeed(feedId, targetId, liveId) {
   const el = document.getElementById(feedId);
   if (el) { el.value = maxFeed.toFixed(3); liveRa(feedId, liveId); }
   showToast(`Ra${target}μm → 最大送り f=${maxFeed.toFixed(3)} mm/rev を適用`);
+}
+
+// ===== 自動加工戦略 =====
+function calcStrategy() {
+  const blankD = fv('auto-blank-d', 0);
+  const finD   = fv('auto-fin-d',   0);
+  const finL   = fv('auto-fin-l',  80);
+  if (!blankD || !finD || blankD <= finD) return null;
+
+  const mat    = v('mat');
+  const toolMat = v('toolmat');
+  const toolD  = fv('tooldia', 25);
+  const noseR  = getNoseR();
+  const targetRa = fv('auto-ra', 0);
+
+  const roughC = calcConditions(mat, toolMat, toolD, '荒削り') || {rpm:800,  feed:0.25, ap:2.0};
+  const midC   = calcConditions(mat, toolMat, toolD, '中削り') || {rpm:1000, feed:0.15, ap:1.0};
+  const finC   = calcConditions(mat, toolMat, toolD, '仕上げ') || {rpm:1500, feed:0.10, ap:0.2};
+
+  const finFeed = targetRa > 0
+    ? parseFloat(Math.sqrt(8 * noseR * targetRa / 1000).toFixed(4))
+    : finC.feed;
+  const finAp   = finC.ap;
+  const totalAp = (blankD - finD) / 2;
+
+  let stages = [];
+  if (totalAp <= finAp) {
+    stages = [{label:'仕上げ', type:'fin', ap:totalAp, rpm:finC.rpm, feed:finFeed, passes:1}];
+  } else if (totalAp <= 6) {
+    const rem = totalAp - finAp;
+    const n   = Math.max(1, Math.ceil(rem / roughC.ap));
+    stages = [
+      {label:'粗削り', type:'rough', ap:rem/n,  rpm:roughC.rpm, feed:roughC.feed, passes:n},
+      {label:'仕上げ', type:'fin',   ap:finAp,  rpm:finC.rpm,   feed:finFeed,     passes:1},
+    ];
+  } else {
+    const semiAp = midC.ap;
+    const rem    = totalAp - finAp - semiAp;
+    const n      = Math.max(1, Math.ceil(rem / roughC.ap));
+    stages = [
+      {label:'粗削り', type:'rough', ap:rem/n,  rpm:roughC.rpm, feed:roughC.feed, passes:n},
+      {label:'中削り', type:'mid',   ap:semiAp, rpm:midC.rpm,   feed:midC.feed,   passes:1},
+      {label:'仕上げ', type:'fin',   ap:finAp,  rpm:finC.rpm,   feed:finFeed,     passes:1},
+    ];
+  }
+  return {blankD, finD, finL, totalAp, stages, noseR, targetRa};
+}
+
+function previewStrategy() {
+  const s  = calcStrategy();
+  const el = document.getElementById('auto-preview');
+  if (!el) return;
+  if (!s) { el.innerHTML = ''; return; }
+
+  const colors = {rough:'var(--red)', mid:'var(--amber)', fin:'var(--green)'};
+  const labels = {rough:'粗削り', mid:'中削り', fin:'仕上げ'};
+  const stagesHtml = s.stages.map(st => {
+    const r = calcRoughness(st.feed, s.noseR);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg1);border-left:3px solid ${colors[st.type]};margin-bottom:4px;border-radius:0 var(--radius) var(--radius) 0;font-size:12px">
+      <div style="min-width:68px;font-weight:700;color:${colors[st.type]}">${st.label}</div>
+      <div style="flex:1;color:var(--text2)">${st.passes}パス &nbsp;ap=${st.ap.toFixed(2)}mm &nbsp;${st.rpm}rpm &nbsp;F${parseFloat(st.feed).toFixed(3)}mm/rev</div>
+      <div style="color:var(--text3);font-size:11px;white-space:nowrap">理論Ra≈${r.ra}μm</div>
+    </div>`;
+  }).join('');
+
+  const flowLabel = s.stages.map(st => st.label + (st.passes > 1 ? ` ×${st.passes}` : '')).join(' → ');
+  const finRa = calcRoughness(s.stages[s.stages.length - 1].feed, s.noseR);
+
+  el.innerHTML = `
+    <div style="padding:8px 12px;background:var(--bg2);border-radius:var(--radius);margin-bottom:8px;font-size:12px;display:flex;gap:16px;flex-wrap:wrap">
+      <span>削り代: <strong>${(s.totalAp*2).toFixed(2)}mm</strong>（片側 ${s.totalAp.toFixed(2)}mm）</span>
+      <span>戦略: <strong style="color:var(--accent)">${flowLabel}</strong></span>
+    </div>
+    ${stagesHtml}
+    <div class="alert ${parseFloat(finRa.ra) <= (s.targetRa||3.2) ? 'alert-success' : 'alert-warn'}" style="margin-top:6px;font-size:11px">
+      仕上げ後の理論Ra ≈ <strong>${finRa.ra}μm</strong> / Rz ≈ ${finRa.ry}μm
+      ${s.targetRa ? `（目標Ra${s.targetRa}μm ${parseFloat(finRa.ra)<=s.targetRa?'✅ 達成':'⚠ 未達'}）` : ''}
+    </div>`;
 }
 
 function onTaperTypeChange() {
@@ -701,6 +794,37 @@ function generate(proc) {
       {t:'仕上げパス',d:`送り${ffeed}mm/revに落として平面度・面粗さを確保。X-1まで送り中心を確実に削り切る。`},
       {t:'G96周速一定',d:'端面加工は径が変化するためG96必須。中心に近づくほど回転数が上がります。'},
     ];
+  }
+
+  if (proc === 'auto') {
+    const s = calcStrategy();
+    if (!s) { showToast('素材径・仕上げ径・長さを入力してください', 'error'); return; }
+    const tNo = resolveToolNo('od');
+    const flowLabel = s.stages.map(st => st.label + (st.passes > 1 ? `×${st.passes}` : '')).join('+');
+    const lines = [
+      `(AUTO 外径旋削: ${flowLabel})`,
+      `(素材φ${s.blankD} → 仕上げφ${s.finD} L${s.finL}mm 削り代${(s.totalAp*2).toFixed(2)}mm)`,
+      `%`, `O0001`,
+      `G28 U0. W0.`, `G50 S3000`,
+    ];
+
+    s.stages.forEach((st, si) => {
+      // 残り代の合計（次ステージ以降の ap*2）= このステージ終了時の X
+      const stageEndX = s.finD + s.stages.slice(si + 1).reduce((sum, x) => sum + x.ap * 2, 0);
+      lines.push(``, `(===== ${st.label} ${st.passes}パス ap=${st.ap.toFixed(2)}mm S${st.rpm} F${parseFloat(st.feed).toFixed(3)} =====)`);
+      lines.push(`G96 S${st.rpm} M03`);
+      if (si === 0) lines.push(`${tNo} M08`);
+      for (let p = 1; p <= st.passes; p++) {
+        const cx = (stageEndX + (st.passes - p) * st.ap * 2).toFixed(3);
+        lines.push(`G00 X${cx}`, `G01 Z-${s.finL}. F${parseFloat(st.feed).toFixed(3)}`, `G00 X${(s.blankD+2).toFixed(1)}.`, `Z2.`);
+      }
+    });
+    lines.push(``, `G00 X${(s.blankD+10).toFixed(1)}. Z100.`, `M05 M09`, `G28 U0. W0.`, `M30`, `%`);
+    gcode = lines.join('\n');
+    steps = s.stages.map(st => ({
+      t: `${st.label}（${st.passes}パス）`,
+      d: `ap=${st.ap.toFixed(2)}mm / ${st.rpm}rpm / F${parseFloat(st.feed).toFixed(3)}mm/rev / 除去量φ${(st.ap*2*st.passes).toFixed(2)}mm`,
+    }));
   }
 
   lastGcode = gcode;
