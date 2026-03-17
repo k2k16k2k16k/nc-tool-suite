@@ -62,6 +62,11 @@
 .step-ind.active{background:var(--bg1);color:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .step-ind.done{color:var(--green)}
 
+/* 複合工程カード */
+.step-card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;overflow:hidden}
+.step-card-header{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.step-card-num{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-l);padding:2px 8px;border-radius:4px}
+
 @media(max-width:900px){.dxf-layout{grid-template-columns:1fr}}
 </style>
 </head>
@@ -250,63 +255,29 @@ if (localStorage.getItem('guide_open')) {
 <div class="dxf-right">
   <div class="right-header">
     <h2>📐 加工設定 → Gコード生成</h2>
-    <p>抽出した寸法を加工パラメータにマッピングします</p>
+    <p>工程を追加して複合加工プログラムを生成できます</p>
   </div>
   <div class="mapping-area">
 
-    <!-- 加工種別選択 -->
+    <!-- 素材（全工程共通） -->
     <div class="map-card">
-      <div class="map-card-title">🔧 加工種別</div>
-      <div class="proc-select-row">
-        <button class="proc-sel-btn active" onclick="selectProc('od',this)">外径旋削</button>
-        <button class="proc-sel-btn" onclick="selectProc('id',this)">内径ボーリング</button>
-        <button class="proc-sel-btn" onclick="selectProc('thread',this)">ねじ切り</button>
-        <button class="proc-sel-btn" onclick="selectProc('groove',this)">溝入れ</button>
-        <button class="proc-sel-btn" onclick="selectProc('taper',this)">テーパー・R</button>
+      <div class="map-card-title">⚙ 素材（全工程共通）</div>
+      <div class="field">
+        <select id="dxf-mat" onchange="onMatChange()">
+          <option value="S45C">S45C</option><option value="SS400">SS400</option>
+          <option value="SCM440">SCM440</option><option value="SUS304">SUS304</option>
+          <option value="SUS316">SUS316</option><option value="A2017">A2017</option>
+          <option value="A5052">A5052</option><option value="A6061">A6061</option>
+          <option value="C3604">C3604</option>
+        </select>
       </div>
     </div>
 
-    <!-- 素材・工具 -->
-    <div class="map-card">
-      <div class="map-card-title">⚙ 素材・工具</div>
-      <div class="grid-2">
-        <div class="field"><label>素材</label>
-          <select id="dxf-mat">
-            <option value="S45C">S45C</option><option value="SS400">SS400</option>
-            <option value="SCM440">SCM440</option><option value="SUS304">SUS304</option>
-            <option value="SUS316">SUS316</option><option value="A2017">A2017</option>
-            <option value="A5052">A5052</option><option value="A6061">A6061</option>
-            <option value="C3604">C3604</option>
-          </select>
-        </div>
-        <div class="field"><label>仕上げ種別</label>
-          <select id="dxf-finish">
-            <option>荒削り</option><option selected>中削り</option><option>仕上げ</option>
-          </select>
-        </div>
-      </div>
-    </div>
+    <!-- 複合工程リスト -->
+    <div id="steps-container"></div>
+    <button class="btn btn-full" style="margin-bottom:12px;border-style:dashed" onclick="addStep()">＋ 工程を追加</button>
 
-    <!-- 寸法マッピング（加工種別によって動的変化） -->
-    <div class="map-card" id="mapping-card">
-      <div class="map-card-title">📏 寸法マッピング</div>
-      <div id="mapping-form">
-        <div class="alert alert-info">左の図面から寸法を選択するか、直接入力してください。</div>
-      </div>
-    </div>
-
-    <!-- 切削条件 -->
-    <div class="map-card">
-      <div class="map-card-title">⚡ 切削条件</div>
-      <div class="grid-3">
-        <div class="field"><label>回転数 (rpm)</label><input type="number" id="dxf-rpm" placeholder="自動計算"></div>
-        <div class="field"><label>送り (mm/rev)</label><input type="number" id="dxf-feed" step="0.01" placeholder="自動計算"></div>
-        <div class="field"><label>切込み (mm)</label><input type="number" id="dxf-depth" step="0.1" placeholder="自動計算"></div>
-      </div>
-      <button class="btn btn-sm" onclick="autoCalcConditions()">⚡ 切削条件を自動計算</button>
-    </div>
-
-    <!-- メモ・品番 -->
+    <!-- 実績情報 -->
     <div class="map-card">
       <div class="map-card-title">📋 実績情報</div>
       <div class="grid-2">
@@ -724,7 +695,7 @@ function toggleDim(key, type, value) {
     dimSelections[key] = {type, value};
   }
   renderDims();
-  updateMappingFromDims();
+  renderAllSteps();
 }
 
 function goToMapping() {
@@ -733,179 +704,304 @@ function goToMapping() {
     return;
   }
   setStep(3);
-  updateMappingFromDims();
+  renderAllSteps();
 }
 
-// ===== 加工種別と寸法マッピング =====
-let currentProc = 'od';
+// ===== 加工種別定義 =====
+const PROC_LABELS = {od:'外径旋削', id:'内径ボーリング', thread:'ねじ切り', groove:'溝入れ', taper:'テーパー・R'};
 
 const PROC_FIELDS = {
   od: [
-    {id:'blank_d',  label:'素材径 (mm)',     dimTypes:['直径','直径(テキスト)'], hint:'最大直径の値'},
-    {id:'fin_d',    label:'仕上げ外径 (mm)', dimTypes:['直径','直径(テキスト)'], hint:'仕上げ後の直径'},
-    {id:'fin_l',    label:'仕上げ長さ (mm)', dimTypes:['水平長さ','垂直長さ','長さ(テキスト)'], hint:'加工長さ'},
+    {id:'blank_d', label:'素材径 (mm)',      dimTypes:['直径','直径(テキスト)'],              hint:'最大直径の値'},
+    {id:'fin_d',   label:'仕上げ外径 (mm)',  dimTypes:['直径','直径(テキスト)'],              hint:'仕上げ後の直径'},
+    {id:'fin_l',   label:'仕上げ長さ (mm)',  dimTypes:['水平長さ','垂直長さ','長さ(テキスト)'], hint:'加工長さ'},
   ],
   id: [
-    {id:'pre_d',    label:'下穴径 (mm)',     dimTypes:['直径','直径(テキスト)'], hint:'現在の穴径'},
-    {id:'fin_d',    label:'仕上げ内径 (mm)', dimTypes:['直径','直径(テキスト)'], hint:'仕上げ後の内径'},
-    {id:'dep',      label:'ボーリング深さ(mm)',dimTypes:['垂直長さ','水平長さ'], hint:'穴の深さ'},
+    {id:'pre_d',   label:'下穴径 (mm)',        dimTypes:['直径','直径(テキスト)'], hint:'現在の穴径'},
+    {id:'fin_d',   label:'仕上げ内径 (mm)',    dimTypes:['直径','直径(テキスト)'], hint:'仕上げ後の内径'},
+    {id:'dep',     label:'ボーリング深さ (mm)', dimTypes:['垂直長さ','水平長さ'],   hint:'穴の深さ'},
   ],
   thread: [
-    {id:'d',        label:'ねじ外径 (mm)',   dimTypes:['直径','直径(テキスト)'], hint:'ねじの呼び径'},
-    {id:'pitch',    label:'ピッチ (mm)',      dimTypes:[], hint:'例: 1.5, 2.0'},
-    {id:'len',      label:'ねじ長さ (mm)',   dimTypes:['水平長さ','垂直長さ'], hint:'ねじ部の長さ'},
+    {id:'d',     label:'ねじ外径 (mm)', dimTypes:['直径','直径(テキスト)'], hint:'ねじの呼び径'},
+    {id:'pitch', label:'ピッチ (mm)',   dimTypes:[],                        hint:'例: 1.5, 2.0'},
+    {id:'len',   label:'ねじ長さ (mm)', dimTypes:['水平長さ','垂直長さ'],   hint:'ねじ部の長さ'},
   ],
   groove: [
-    {id:'w',        label:'溝幅 (mm)',        dimTypes:['水平長さ','垂直長さ'], hint:'溝の幅'},
-    {id:'d',        label:'溝深さ (mm)',      dimTypes:['垂直長さ','水平長さ'], hint:'溝の深さ'},
-    {id:'x',        label:'X位置-径 (mm)',   dimTypes:['直径','直径(テキスト)'], hint:'溝位置の直径'},
-    {id:'z',        label:'Z位置 (mm)',       dimTypes:['水平長さ'], hint:'端面からの距離（マイナス）'},
+    {id:'w', label:'溝幅 (mm)',      dimTypes:['水平長さ','垂直長さ'],    hint:'溝の幅'},
+    {id:'d', label:'溝深さ (mm)',    dimTypes:['垂直長さ','水平長さ'],    hint:'溝の深さ'},
+    {id:'x', label:'X位置-径 (mm)', dimTypes:['直径','直径(テキスト)'],  hint:'溝位置の直径'},
+    {id:'z', label:'Z位置 (mm)',    dimTypes:['水平長さ'],               hint:'端面からの距離'},
   ],
   taper: [
-    {id:'d1',       label:'開始径 (mm)',      dimTypes:['直径','直径(テキスト)'], hint:'テーパー開始側の直径'},
-    {id:'d2',       label:'終了径 (mm)',      dimTypes:['直径','直径(テキスト)'], hint:'テーパー終了側の直径'},
-    {id:'len',      label:'テーパー長さ(mm)', dimTypes:['水平長さ','垂直長さ'], hint:'テーパー区間の長さ'},
+    {id:'d1',  label:'開始径 (mm)',      dimTypes:['直径','直径(テキスト)'], hint:'テーパー開始側の直径'},
+    {id:'d2',  label:'終了径 (mm)',      dimTypes:['直径','直径(テキスト)'], hint:'テーパー終了側の直径'},
+    {id:'len', label:'テーパー長さ (mm)', dimTypes:['水平長さ','垂直長さ'],   hint:'テーパー区間の長さ'},
   ],
 };
 
-function selectProc(proc, btn) {
-  document.querySelectorAll('.proc-sel-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  currentProc = proc;
-  updateMappingFromDims();
+// ===== 複合工程管理 =====
+let compoundSteps = [{proc:'od', toolId:null, finish:'中削り', rpm:'', feed:'', depth:'', params:{}}];
+
+function addStep() {
+  // 追加前に現在値を保存
+  compoundSteps.forEach((_, i) => saveStepValues(i));
+  compoundSteps.push({proc:'od', toolId:null, finish:'中削り', rpm:'', feed:'', depth:'', params:{}});
+  renderAllSteps();
 }
 
-function updateMappingFromDims() {
-  const fields = PROC_FIELDS[currentProc] || [];
+function removeStep(idx) {
+  compoundSteps.forEach((_, i) => saveStepValues(i));
+  compoundSteps.splice(idx, 1);
+  renderAllSteps();
+}
+
+function updateStepProc(idx, proc) {
+  saveStepValues(idx);
+  compoundSteps[idx].proc = proc;
+  compoundSteps[idx].params = {};
+  renderAllSteps();
+}
+
+function saveStepValues(idx) {
+  const step = compoundSteps[idx];
+  if (!step) return;
+  const fields = PROC_FIELDS[step.proc] || [];
+  fields.forEach(f => {
+    const el = document.getElementById(`s${idx}-mf-${f.id}`);
+    if (el) step.params[f.id] = el.value;
+  });
+  const rEl = document.getElementById(`s${idx}-rpm`);
+  const fEl = document.getElementById(`s${idx}-feed`);
+  const dEl = document.getElementById(`s${idx}-depth`);
+  const tEl = document.getElementById(`s${idx}-tool`);
+  const fnEl = document.getElementById(`s${idx}-finish`);
+  if (rEl)  step.rpm    = rEl.value;
+  if (fEl)  step.feed   = fEl.value;
+  if (dEl)  step.depth  = dEl.value;
+  if (tEl)  step.toolId = tEl.value ? parseInt(tEl.value) : null;
+  if (fnEl) step.finish = fnEl.value;
+}
+
+function renderAllSteps() {
+  const tools = TOOL_DB.getAll();
+  const container = document.getElementById('steps-container');
+  if (!container) return;
   const selArr = Object.values(dimSelections);
 
-  // 自動割り当て：dimTypeが一致するものを優先
-  const autoAssign = {};
-  const usedKeys = new Set();
+  container.innerHTML = compoundSteps.map((step, idx) => {
+    const fields = PROC_FIELDS[step.proc] || [];
 
-  fields.forEach(f => {
-    for (const s of selArr) {
-      const key = `${s.type}_${s.value}`;
-      if (!usedKeys.has(key) && f.dimTypes.includes(s.type)) {
-        autoAssign[f.id] = s.value;
-        usedKeys.add(key);
+    // 寸法自動割り当て
+    const autoAssign = {};
+    const usedKeys = new Set();
+    fields.forEach(f => {
+      for (const s of selArr) {
+        const key = `${s.type}_${s.value}`;
+        if (!usedKeys.has(key) && f.dimTypes.includes(s.type)) {
+          autoAssign[f.id] = s.value;
+          usedKeys.add(key);
+          break;
+        }
+      }
+    });
+
+    const toolOptions = tools.map(t =>
+      `<option value="${t.id}"${step.toolId===t.id?' selected':''}>T${t.no}: ${t.name}（${t.mat} φ${t.dia}）</option>`
+    ).join('');
+    const finishOpts = ['荒削り','中削り','仕上げ'].map(f =>
+      `<option${f===step.finish?' selected':''}>${f}</option>`).join('');
+    const procBtns = Object.entries(PROC_LABELS).map(([p, lbl]) =>
+      `<button class="proc-sel-btn${p===step.proc?' active':''}" onclick="updateStepProc(${idx},'${p}')">${lbl}</button>`
+    ).join('');
+    const mappingRows = fields.map(f => {
+      const val = step.params[f.id] !== undefined && step.params[f.id] !== '' ? step.params[f.id] : (autoAssign[f.id] || '');
+      return `<div class="map-row">
+        <span class="map-label">${f.label}</span>
+        <span class="map-arrow">←</span>
+        <input class="map-input" type="number" id="s${idx}-mf-${f.id}" value="${val}" placeholder="${f.hint}" step="0.1">
+        <span style="font-size:10px;color:var(--text3);margin-left:4px">mm</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="step-card">
+      <div class="step-card-header">
+        <span class="step-card-num">工程 ${idx+1}</span>
+        <span style="font-size:12px;color:var(--text2);margin-left:4px">${PROC_LABELS[step.proc]}</span>
+        ${compoundSteps.length > 1 ? `<button class="btn btn-sm" style="margin-left:auto;color:var(--red);border-color:var(--red)" onclick="removeStep(${idx})">✕ 削除</button>` : ''}
+      </div>
+      <div style="padding:12px">
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px;letter-spacing:.5px">加工種別</div>
+          <div class="proc-select-row">${procBtns}</div>
+        </div>
+        <div class="grid-2" style="margin-bottom:10px">
+          <div class="field">
+            <label>使用工具${tools.length ? '' : ' <span style="color:var(--text3);font-weight:400">(未登録)</span>'}</label>
+            <select id="s${idx}-tool" onchange="onToolSelect(${idx})">
+              <option value="">-- 手動設定 --</option>
+              ${toolOptions}
+            </select>
+          </div>
+          <div class="field">
+            <label>仕上げ種別</label>
+            <select id="s${idx}-finish" onchange="onFinishChange(${idx})">${finishOpts}</select>
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px;letter-spacing:.5px">寸法マッピング</div>
+          ${mappingRows || '<div style="font-size:12px;color:var(--text2)">パラメータなし</div>'}
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px;letter-spacing:.5px">
+            切削条件
+            <button class="btn btn-sm" style="font-size:10px;padding:1px 7px;margin-left:6px" onclick="autoCalcStep(${idx})">⚡ 自動計算</button>
+          </div>
+          <div class="grid-3">
+            <div class="field"><label>回転数 (rpm)</label><input type="number" id="s${idx}-rpm" value="${step.rpm||''}" placeholder="自動"></div>
+            <div class="field"><label>送り (mm/rev)</label><input type="number" id="s${idx}-feed" value="${step.feed||''}" step="0.01" placeholder="自動"></div>
+            <div class="field"><label>切込み (mm)</label><input type="number" id="s${idx}-depth" value="${step.depth||''}" step="0.1" placeholder="自動"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function onToolSelect(idx) {
+  const toolId = parseInt(document.getElementById(`s${idx}-tool`).value);
+  const finish = document.getElementById(`s${idx}-finish`).value;
+  const mat = document.getElementById('dxf-mat').value;
+  const tool = TOOL_DB.getAll().find(t => t.id === toolId);
+  if (!tool) return;
+  const c = calcConditions(mat, tool.mat, tool.dia || 25, finish);
+  if (!c) return;
+  document.getElementById(`s${idx}-rpm`).value   = c.rpm;
+  document.getElementById(`s${idx}-feed`).value  = c.feed;
+  document.getElementById(`s${idx}-depth`).value = c.ap;
+  compoundSteps[idx].toolId = toolId;
+  showToast(`工程${idx+1}: T${tool.no} ${tool.name} から切削条件を計算`);
+}
+
+function onFinishChange(idx) {
+  const toolEl = document.getElementById(`s${idx}-tool`);
+  if (toolEl?.value) onToolSelect(idx);
+}
+
+function onMatChange() {
+  compoundSteps.forEach((step, idx) => {
+    const toolEl = document.getElementById(`s${idx}-tool`);
+    if (toolEl?.value) onToolSelect(idx);
+  });
+}
+
+function autoCalcStep(idx) {
+  const mat    = document.getElementById('dxf-mat').value;
+  const finish = document.getElementById(`s${idx}-finish`)?.value || '中削り';
+  const toolId = parseInt(document.getElementById(`s${idx}-tool`)?.value || '0');
+  const tool   = TOOL_DB.getAll().find(t => t.id === toolId);
+  const c = calcConditions(mat, tool ? tool.mat : '超硬', tool ? (tool.dia || 25) : 25, finish);
+  if (!c) return;
+  document.getElementById(`s${idx}-rpm`).value   = c.rpm;
+  document.getElementById(`s${idx}-feed`).value  = c.feed;
+  document.getElementById(`s${idx}-depth`).value = c.ap;
+  showToast(`工程${idx+1}: 切削条件を自動計算 ${c.rpm}rpm / f${c.feed} / ap${c.ap}`);
+}
+
+// ===== Gコード生成（複合加工対応） =====
+let lastDXFGcode = '';
+
+function generateFromDXF() {
+  compoundSteps.forEach((_, i) => saveStepValues(i));
+  const mat    = document.getElementById('dxf-mat').value;
+  const progNo = parseInt(document.getElementById('dxf-progno').value) || 1000;
+  const tools  = TOOL_DB.getAll();
+
+  const allLines = [
+    `(${compoundSteps.length > 1 ? `複合加工 ${compoundSteps.length}工程` : PROC_LABELS[compoundSteps[0].proc]} / 素材:${mat})`,
+    `(図面読み込みで生成)`,
+    `%`,
+    `O${String(progNo).padStart(4,'0')}`,
+    `G28 U0. W0.`,
+    `G50 S3000`,
+  ];
+  const procNames = [];
+
+  compoundSteps.forEach((step, idx) => {
+    const mfv = (fid, def) => {
+      const el = document.getElementById(`s${idx}-mf-${fid}`);
+      return parseFloat(el?.value !== '' ? el?.value : undefined) || parseFloat(step.params[fid]) || def;
+    };
+    const defaultC = calcConditions(mat, '超硬', 25, step.finish) || {};
+    const rpm   = parseFloat(document.getElementById(`s${idx}-rpm`)?.value  || step.rpm)   || defaultC.rpm   || 1000;
+    const feed  = parseFloat(document.getElementById(`s${idx}-feed`)?.value || step.feed)  || defaultC.feed  || 0.2;
+    const depth = parseFloat(document.getElementById(`s${idx}-depth`)?.value|| step.depth) || defaultC.ap    || 1.5;
+
+    const tool  = tools.find(t => t.id === step.toolId);
+    // T番号：登録工具ならそのno、なければ工程番号ベースのデフォルト
+    const tNoStr = tool ? tool.no.padStart(2,'0') : String((idx+1)*100+1).padStart(4,'0');
+    const tCmd  = tool ? `T${tNoStr.padStart(4,'0')}` : `T${String((idx+1)*100+1).padStart(4,'0')}`;
+    const toolComment = tool ? ` [T${tool.no} ${tool.name}]` : '';
+
+    allLines.push(``, `(--- 工程${idx+1}: ${PROC_LABELS[step.proc]}${toolComment} ---)`);
+    procNames.push(PROC_LABELS[step.proc]);
+
+    switch(step.proc) {
+      case 'od': {
+        const bd=mfv('blank_d',50), fd=mfv('fin_d',45), fl=mfv('fin_l',80);
+        const passes=Math.max(1,Math.ceil((bd-fd)/2/depth));
+        allLines.push(`G96 S${rpm} M03`, `${tCmd} M08`, `G00 X${bd+2}. Z2.`);
+        for(let i=1;i<=passes;i++){
+          const cx=Math.max(fd,(bd-depth*2*i)).toFixed(3);
+          allLines.push(`G00 X${cx}`,`G01 Z-${fl}. F${feed}`,`G00 X${bd+2}.`,`Z2.`);
+        }
+        allLines.push(`G00 X${fd}.`,`G01 Z-${fl}. F${(feed*.6).toFixed(3)}`,`G00 X${bd+5}. Z100.`,`M09`);
+        break;
+      }
+      case 'id': {
+        const pd=mfv('pre_d',20), fd=mfv('fin_d',25), dep=mfv('dep',40);
+        const passes=Math.max(1,Math.ceil((fd-pd)/2/depth));
+        allLines.push(`G96 S${rpm} M03`, `${tCmd} M08`, `G00 X${pd-1}. Z2.`);
+        for(let i=1;i<=passes;i++){
+          const cx=(pd+depth*2*i).toFixed(3);
+          allLines.push(`G00 X${cx}`,`G01 Z-${dep}. F${feed}`,`G04 X0.3`,`G00 Z2.`);
+        }
+        allLines.push(`G00 X${fd}.`,`G01 Z-${dep}. F${(feed*.7).toFixed(3)}`,`G00 Z100.`,`M09`);
+        break;
+      }
+      case 'thread': {
+        const d=mfv('d',20), pitch=mfv('pitch',1.5), len=mfv('len',30);
+        const h=0.6495*pitch, passes=5, cham=1.5;
+        const apP=(h/passes).toFixed(4);
+        allLines.push(`G97 S${rpm} M03`, `${tCmd} M08`, `G00 X${d+2}. Z5.`);
+        for(let i=1;i<=passes;i++){
+          const cx=(d-apP*2*i).toFixed(3);
+          allLines.push(`G00 X${cx}`,`G32 Z-${(len+cham).toFixed(1)}. F${pitch}`,`G00 X${d+2}.`,`Z5.`);
+        }
+        allLines.push(`G00 X${d+10}. Z100.`,`M09`);
+        break;
+      }
+      case 'groove': {
+        const gw=mfv('w',3), gd=mfv('d',5), gx=mfv('x',40), gz=-(mfv('z',30));
+        const finX=(gx-gd*2).toFixed(3);
+        allLines.push(`G97 S${rpm} M03`, `${tCmd} M08`,
+          `G00 X${gx+2}. Z${gz}.`,`G01 X${finX} F${feed}`,`G04 X0.5`,`G01 X${gx+2}.`,`G00 Z100.`,`M09`);
+        break;
+      }
+      case 'taper': {
+        const d1=mfv('d1',50), d2=mfv('d2',40), tlen=mfv('len',20);
+        allLines.push(`G96 S${rpm} M03`, `${tCmd} M08`,
+          `G00 X${d1+2}. Z2.`,`G01 X${d1}. Z0. F${feed}`,`G01 X${d2}. Z-${tlen}. F${feed}`,
+          `G00 X${Math.max(d1,d2)+10}. Z100.`,`M09`);
         break;
       }
     }
+    allLines.push(`G28 U0. W0.`);
   });
 
-  const el = document.getElementById('mapping-form');
-  el.innerHTML = fields.map(f => `
-    <div class="map-row">
-      <span class="map-label">${f.label}</span>
-      <span class="map-arrow">←</span>
-      <input class="map-input" type="number" id="mf-${f.id}" value="${autoAssign[f.id]||''}" placeholder="${f.hint}" step="0.1">
-      <span style="font-size:10px;color:var(--text3);margin-left:4px">mm</span>
-    </div>
-  `).join('');
+  allLines.push(``, `M05`, `M30`, `%`);
+  lastDXFGcode = allLines.join('\n');
 
-  if (!selArr.length) {
-    el.innerHTML = '<div class="alert alert-info">左の図面から寸法を選択、または直接入力してください。</div>' + el.innerHTML;
-  }
-}
-
-function autoCalcConditions() {
-  const mat = document.getElementById('dxf-mat').value;
-  const finish = document.getElementById('dxf-finish').value;
-  const toolD = 25; // デフォルト工具径
-  const c = calcConditions(mat, '超硬', toolD, finish);
-  if (c) {
-    document.getElementById('dxf-rpm').value = c.rpm;
-    document.getElementById('dxf-feed').value = c.feed;
-    document.getElementById('dxf-depth').value = c.ap;
-    showToast(`切削条件を自動計算: ${c.rpm}rpm / f${c.feed} / ap${c.ap}`);
-  }
-}
-
-// ===== Gコード生成 =====
-let lastDXFGcode = '';
-
-function mf(id, def) { return parseFloat(document.getElementById('mf-'+id)?.value) || def; }
-function cv(id, def) { return parseFloat(document.getElementById('dxf-'+id)?.value) || def; }
-
-function generateFromDXF() {
-  const mat = document.getElementById('dxf-mat').value;
-  const finish = document.getElementById('dxf-finish').value;
-  const progNo = cv('progno', 1000);
-  const rpm   = cv('rpm', 0) || calcConditions(mat,'超硬',25,finish)?.rpm || 1000;
-  const feed  = cv('feed',0) || calcConditions(mat,'超硬',25,finish)?.feed || 0.2;
-  const depth = cv('depth',0) || calcConditions(mat,'超硬',25,finish)?.ap || 1.5;
-
-  let lines = [];
-  let procName = '';
-
-  switch(currentProc) {
-    case 'od': {
-      const bd=mf('blank_d',50), fd=mf('fin_d',45), fl=mf('fin_l',80);
-      const passes=Math.max(1,Math.ceil((bd-fd)/2/depth));
-      procName='外径旋削';
-      lines=[`(外径旋削 ${mat} ${finish})`,`(図面読み込み: 素材径${bd}→仕上げ${fd}mm L:${fl}mm)`,`%`,`O${String(progNo).padStart(4,'0')}`,
-        `G28 U0. W0.`,`G50 S3000`,`G96 S${rpm} M03`,`T0101 M08`,`G00 X${bd+2}. Z2.`];
-      for(let i=1;i<=passes;i++){
-        const cx=Math.max(fd,(bd-depth*2*i)).toFixed(3);
-        lines.push(`G00 X${cx}`,`G01 Z-${fl}. F${feed}`,`G00 X${bd+2}.`,`Z2.`);
-      }
-      lines.push(`G00 X${fd}.`,`G01 Z-${fl}. F${(feed*.6).toFixed(3)}`,`G00 X${bd+5}. Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`);
-      break;
-    }
-    case 'id': {
-      const pd=mf('pre_d',20), fd=mf('fin_d',25), dep=mf('dep',40);
-      const passes=Math.max(1,Math.ceil((fd-pd)/2/depth));
-      procName='内径ボーリング';
-      lines=[`(内径ボーリング ${mat})`,`(図面読み込み: 下穴${pd}→仕上げ${fd}mm 深:${dep}mm)`,`%`,`O${String(progNo).padStart(4,'0')}`,
-        `G28 U0. W0.`,`G96 S${rpm} M03`,`T0303 M08`,`G00 X${pd-1}. Z2.`];
-      for(let i=1;i<=passes;i++){
-        const cx=(pd+depth*2*i).toFixed(3);
-        lines.push(`G00 X${cx}`,`G01 Z-${dep}. F${feed}`,`G04 X0.3`,`G00 Z2.`);
-      }
-      lines.push(`G00 X${fd}.`,`G01 Z-${dep}. F${(feed*.7).toFixed(3)}`,`G00 Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`);
-      break;
-    }
-    case 'thread': {
-      const d=mf('d',20), pitch=mf('pitch',1.5), len=mf('len',30);
-      const h=0.6495*pitch, passes=5, cham=1.5;
-      const apP=(h/passes).toFixed(4);
-      procName='ねじ切り';
-      lines=[`(ねじ切り M${d}×P${pitch} 図面読み込み)`,`%`,`O${String(progNo).padStart(4,'0')}`,
-        `G28 U0. W0.`,`G97 S${rpm} M03`,`T0505 M08`,`G00 X${d+2}. Z5.`];
-      for(let i=1;i<=passes;i++){
-        const cx=(d-apP*2*i).toFixed(3);
-        lines.push(`G00 X${cx}`,`G32 Z-${(len+cham).toFixed(1)}. F${pitch}`,`G00 X${d+2}.`,`Z5.`);
-      }
-      lines.push(`G00 X${d+10}. Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`);
-      break;
-    }
-    case 'groove': {
-      const gw=mf('w',3), gd=mf('d',5), gx=mf('x',40), gz=-(mf('z',30));
-      const finX=(gx-gd*2).toFixed(3);
-      procName='溝入れ';
-      lines=[`(溝入れ 幅:${gw}mm 深:${gd}mm 図面読み込み)`,`%`,`O${String(progNo).padStart(4,'0')}`,
-        `G28 U0. W0.`,`G97 S${rpm} M03`,`T0404 M08`,
-        `G00 X${gx+2}. Z${gz}.`,`G01 X${finX} F${feed}`,`G04 X0.5`,`G01 X${gx+2}.`,`Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`];
-      break;
-    }
-    case 'taper': {
-      const d1=mf('d1',50), d2=mf('d2',40), tlen=mf('len',20);
-      procName='テーパー';
-      lines=[`(テーパー D${d1}→D${d2} L:${tlen}mm 図面読み込み)`,`%`,`O${String(progNo).padStart(4,'0')}`,
-        `G28 U0. W0.`,`G96 S${rpm} M03`,`T0101 M08`,
-        `G00 X${d1+2}. Z2.`,`G01 X${d1}. Z0. F${feed}`,`G01 X${d2}. Z-${tlen}. F${feed}`,
-        `G00 X${Math.max(d1,d2)+10}. Z100.`,`M05 M09`,`G28 U0. W0.`,`M30`,`%`];
-      break;
-    }
-    default:
-      showToast('加工種別を選択してください','error'); return;
-  }
-
-  lastDXFGcode = lines.join('\n');
-
-  // 表示
-  let n=1;
+  let n = 1;
   const html = lastDXFGcode.split('\n').map(line => {
     const num = `<span class="lnum">${String(n++).padStart(4,' ')}</span>`;
     let l = line.replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -919,7 +1015,7 @@ function generateFromDXF() {
   document.getElementById('dxf-output').style.display = 'block';
   document.getElementById('dxf-output').scrollIntoView({behavior:'smooth',block:'nearest'});
   setStep(4);
-  showToast(`${procName} Gコードを生成しました`);
+  showToast(`${procNames.join(' + ')} Gコードを生成しました`);
 }
 
 function copyDXFCode()     { copyText(lastDXFGcode); }
@@ -929,17 +1025,20 @@ function saveDXFToLog() {
   if (!lastDXFGcode) return;
   const partNo = document.getElementById('dxf-partno').value || prompt('品番:','');
   if (!partNo) return;
-  LOG_DB.add({partNo, procName: currentProc+' (図面読み込み)', material: document.getElementById('dxf-mat').value,
+  const procName = compoundSteps.map(s => PROC_LABELS[s.proc]).join('+') + ' (図面読み込み)';
+  LOG_DB.add({partNo, procName, material: document.getElementById('dxf-mat').value,
     gcode: lastDXFGcode, memo: document.getElementById('dxf-memo').value || '図面読み込みで生成'});
   showToast('実績に保存しました');
 }
 
 function resetFile() {
   dxfData=null; selectedDims.clear(); Object.keys(dimSelections).forEach(k=>delete dimSelections[k]);
+  compoundSteps = [{proc:'od', toolId:null, finish:'中削り', rpm:'', feed:'', depth:'', params:{}}];
   document.getElementById('upload-area').style.display='block';
   document.getElementById('viewer-area').style.display='none';
   document.getElementById('dxf-file').value='';
   setStep(1);
+  renderAllSteps();
 }
 
 function setStep(n) {
@@ -952,8 +1051,7 @@ function setStep(n) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  updateMappingFromDims();
-  autoCalcConditions();
+  renderAllSteps();
   // D&Dサポート
   const zone = document.getElementById('upload-zone');
   zone.addEventListener('dragover', e=>{e.preventDefault();zone.classList.add('over');});
