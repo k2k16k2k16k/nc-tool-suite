@@ -25,6 +25,11 @@
 .tpl-item-name{flex:1;font-weight:600}
 .tpl-item-date{font-size:11px;color:var(--text3)}
 @media(max-width:900px){.gen-layout{grid-template-columns:1fr;grid-template-rows:1fr auto}}
+.ra-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;margin-bottom:8px;padding:6px 10px;background:var(--bg2);border-radius:var(--radius);font-size:12px}
+.ra-label{color:var(--text2);white-space:nowrap}
+.ra-val{font-family:var(--mono);font-size:13px;color:var(--text)}
+.ra-sep{color:var(--border2);margin:0 4px}
+.ra-input{width:60px;padding:3px 5px;font-size:12px;border:1px solid var(--border);border-radius:3px;font-family:var(--sans);background:var(--bg1);color:var(--text)}
 </style>
 </head>
 <body>
@@ -71,6 +76,13 @@
     <div class="field" style="max-width:90px"><label>仕上げ</label>
       <select id="finish" onchange="onMatChange()">
         <option>荒削り</option><option>中削り</option><option>仕上げ</option>
+      </select>
+    </div>
+    <div class="field" style="max-width:90px"><label>ノーズR (mm)</label>
+      <select id="noseR" onchange="onNoseRChange()">
+        <option value="0.2">R0.2</option><option value="0.4">R0.4</option>
+        <option value="0.8" selected>R0.8</option><option value="1.2">R1.2</option>
+        <option value="1.6">R1.6</option><option value="2.0">R2.0</option>
       </select>
     </div>
     <div class="field">
@@ -139,8 +151,17 @@
       <div class="card-title" style="margin-top:12px">切削条件 <span class="auto-badge" id="badge-od" style="display:none">AUTO</span></div>
       <div class="grid-3">
         <div class="field"><label>回転数 (rpm)</label><input type="number" id="od-rpm" placeholder="1000"></div>
-        <div class="field"><label>送り (mm/rev)</label><input type="number" id="od-feed" placeholder="0.2" step="0.01"></div>
+        <div class="field"><label>送り (mm/rev)</label><input type="number" id="od-feed" placeholder="0.2" step="0.01" oninput="liveRa('od-feed','od-ra-live')"></div>
         <div class="field"><label>切込み (mm)</label><input type="number" id="od-depth" placeholder="1.5" step="0.1"></div>
+      </div>
+      <div class="ra-row">
+        <span class="ra-label">仕上げ送りでの理論Ra:</span>
+        <strong id="od-ra-live" class="ra-val">—</strong>
+        <span class="ra-sep">|</span>
+        <span class="ra-label">目標Ra</span>
+        <input type="number" id="od-ra-target" class="ra-input" placeholder="1.6" step="0.4" min="0.1">
+        <span class="ra-label">μm →</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="applyRaFeed('od-feed','od-ra-target','od-ra-live')">送り計算・適用</button>
       </div>
       <button class="btn btn-primary btn-full" onclick="generate('od')">▶ Gコード生成</button>
     </div>
@@ -157,8 +178,17 @@
       <div class="card-title" style="margin-top:12px">切削条件 <span class="auto-badge" id="badge-id" style="display:none">AUTO</span></div>
       <div class="grid-3">
         <div class="field"><label>回転数 (rpm)</label><input type="number" id="id-rpm" placeholder="800"></div>
-        <div class="field"><label>送り (mm/rev)</label><input type="number" id="id-feed" placeholder="0.15" step="0.01"></div>
+        <div class="field"><label>送り (mm/rev)</label><input type="number" id="id-feed" placeholder="0.15" step="0.01" oninput="liveRa('id-feed','id-ra-live')"></div>
         <div class="field"><label>切込み (mm)</label><input type="number" id="id-ap" placeholder="0.5" step="0.1"></div>
+      </div>
+      <div class="ra-row">
+        <span class="ra-label">仕上げ送りでの理論Ra:</span>
+        <strong id="id-ra-live" class="ra-val">—</strong>
+        <span class="ra-sep">|</span>
+        <span class="ra-label">目標Ra</span>
+        <input type="number" id="id-ra-target" class="ra-input" placeholder="1.6" step="0.4" min="0.1">
+        <span class="ra-label">μm →</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="applyRaFeed('id-feed','id-ra-target','id-ra-live')">送り計算・適用</button>
       </div>
       <button class="btn btn-primary btn-full" onclick="generate('id')">▶ Gコード生成</button>
     </div>
@@ -282,7 +312,16 @@
       <div class="grid-2">
         <div class="field"><label>回転数 (rpm)</label><input type="number" id="fc-rpm" placeholder="1000"></div>
         <div class="field"><label>粗削り送り (mm/rev)</label><input type="number" id="fc-feed" placeholder="0.2" step="0.01"></div>
-        <div class="field"><label>仕上げ送り (mm/rev)</label><input type="number" id="fc-ffeed" placeholder="0.08" step="0.01"></div>
+        <div class="field"><label>仕上げ送り (mm/rev)</label><input type="number" id="fc-ffeed" placeholder="0.08" step="0.01" oninput="liveRa('fc-ffeed','fc-ra-live')"></div>
+      </div>
+      <div class="ra-row">
+        <span class="ra-label">仕上げ送りでの理論Ra:</span>
+        <strong id="fc-ra-live" class="ra-val">—</strong>
+        <span class="ra-sep">|</span>
+        <span class="ra-label">目標Ra</span>
+        <input type="number" id="fc-ra-target" class="ra-input" placeholder="1.6" step="0.4" min="0.1">
+        <span class="ra-label">μm →</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="applyRaFeed('fc-ffeed','fc-ra-target','fc-ra-live')">送り計算・適用</button>
       </div>
       <button class="btn btn-primary btn-full" onclick="generate('face')">▶ Gコード生成</button>
     </div>
@@ -435,6 +474,33 @@ function applyTool() {
 
   onMatChange();
   showToast(`${t.no} 適用 — ノーズR${t.noseR||0.8} → 理論Ra≈${r.ra}μm / ${c?c.rpm+'rpm':''}`, 'success');
+}
+
+// 表面粗さ連動
+function getNoseR() { return parseFloat(document.getElementById('noseR').value) || 0.8; }
+function onNoseRChange() {
+  ['od-feed','id-feed','fc-ffeed'].forEach((fid, i) => {
+    const lids = ['od-ra-live','id-ra-live','fc-ra-live'];
+    liveRa(fid, lids[i]);
+  });
+}
+function liveRa(feedId, liveId) {
+  const feed = parseFloat(document.getElementById(feedId)?.value);
+  const el = document.getElementById(liveId);
+  if (!el) return;
+  if (!feed || feed <= 0) { el.textContent = '—'; el.style.color = ''; return; }
+  const r = calcRoughness(feed, getNoseR());
+  const ra = parseFloat(r.ra);
+  el.textContent = `Ra≈${r.ra}μm (Rz≈${r.ry}μm)`;
+  el.style.color = ra <= 0.8 ? 'var(--accent)' : ra <= 1.6 ? 'var(--green)' : ra <= 3.2 ? 'var(--amber)' : 'var(--red)';
+}
+function applyRaFeed(feedId, targetId, liveId) {
+  const target = parseFloat(document.getElementById(targetId)?.value);
+  if (!target || target <= 0) { showToast('目標Raを入力してください', 'error'); return; }
+  const maxFeed = Math.sqrt(8 * getNoseR() * target / 1000);
+  const el = document.getElementById(feedId);
+  if (el) { el.value = maxFeed.toFixed(3); liveRa(feedId, liveId); }
+  showToast(`Ra${target}μm → 最大送り f=${maxFeed.toFixed(3)} mm/rev を適用`);
 }
 
 function onTaperTypeChange() {

@@ -294,6 +294,12 @@ function render(){
             </select>
           </div>
           <button class="btn btn-sm" style="font-size:11px;white-space:nowrap" onclick="autoCalcStep(${s.id})">⚡ 自動計算</button>
+          <div style="display:flex;align-items:center;gap:4px;font-size:11px">
+            <span style="color:var(--text3);white-space:nowrap">目標Ra</span>
+            <input type="number" id="ra-${s.id}" placeholder="1.6" step="0.4" min="0.1" style="width:55px;padding:2px 5px;font-size:11px;border:1px solid var(--border);border-radius:3px;background:var(--bg1);color:var(--text);font-family:var(--sans)">
+            <span style="color:var(--text3)">μm</span>
+            <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="applyRaToStep(${s.id})">→ 送り適用</button>
+          </div>
           <div class="field" style="margin:0;flex:1;min-width:150px">
             <label style="font-size:10px">コメント</label>
             <input type="text" id="cmt-${s.id}" value="${s.comment}" placeholder="例: 外径荒削り後R注意" style="font-size:12px;padding:4px 7px" oninput="steps.find(x=>x.id==${s.id}).comment=this.value">
@@ -302,6 +308,24 @@ function render(){
       </div>`;
     area.appendChild(card);
   });
+}
+
+function applyRaToStep(id) {
+  const target = parseFloat(document.getElementById(`ra-${id}`)?.value);
+  if (!target || target <= 0) { showToast('目標Raを入力してください', 'error'); return; }
+  const noseR = parseFloat(document.getElementById('tooldia-global').value) || 0.8; // ノーズRとして流用、または固定0.8
+  const maxFeed = Math.sqrt(8 * 0.8 * target / 1000); // ノーズR 0.8mm 基準
+  const s = steps.find(s => s.id === id); if (!s) return;
+  const feedKey = ['keyway','mill'].includes(s.type) ? null : 'feed';
+  if (!feedKey) { showToast('この工程はRa→送り適用対象外です', 'error'); return; }
+  const el = document.getElementById(`p-${id}-${feedKey}`);
+  if (el) {
+    el.value = maxFeed.toFixed(3);
+    el.style.background = 'var(--green-l)';
+    setTimeout(() => el.style.background = '', 1500);
+    s.params[feedKey] = maxFeed;
+  }
+  showToast(`Ra${target}μm → f≤${maxFeed.toFixed(3)} mm/rev を適用（ノーズR0.8基準）`);
 }
 
 // 切削条件自動計算

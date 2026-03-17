@@ -176,6 +176,35 @@
         </div>
         <div class="result-box" id="rough-result">入力してください</div>
       </div>
+      <!-- 逆算カード -->
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">🔄 逆算: 目標Ra → 必要送り</div>
+        <div class="grid-2">
+          <div>
+            <div class="field"><label>目標 Ra (μm)</label>
+              <select id="rg-ra-sel" onchange="calcRaInv()">
+                <option value="6.3">Ra 6.3μm（▽▽ 荒仕上げ）</option>
+                <option value="3.2" selected>Ra 3.2μm（▽▽▽ 並仕上げ）</option>
+                <option value="1.6">Ra 1.6μm（▽▽▽▽ 精仕上げ）</option>
+                <option value="0.8">Ra 0.8μm（鏡面仕上げ）</option>
+                <option value="custom">カスタム入力</option>
+              </select>
+            </div>
+            <div class="field" id="rg-ra-custom-wrap" style="display:none">
+              <label>Ra カスタム値 (μm)</label>
+              <input type="number" id="rg-ra-custom" value="1.6" step="0.1" min="0.1" oninput="calcRaInv()">
+            </div>
+            <div class="field"><label>ノーズR Re (mm)</label>
+              <select id="rg-noseR-inv" onchange="calcRaInv()">
+                <option value="0.2">R0.2</option><option value="0.4">R0.4</option>
+                <option value="0.8" selected>R0.8</option><option value="1.2">R1.2</option>
+                <option value="1.6">R1.6</option><option value="2.0">R2.0</option>
+              </select>
+            </div>
+          </div>
+          <div class="result-box" id="rough-inv-result">選択してください</div>
+        </div>
+      </div>
     </div>
 
     <!-- ⑤ 切削負荷 -->
@@ -537,6 +566,32 @@ function calcRough() {
       ${ok ? `✅ 目標面粗さ Ra${target}μm を達成できます` : `❌ Ra${r.ra}μm > 目標Ra${target}μm\n送りを f≤${maxFeed}mm/rev に下げてください`}
     </div>
     <div class="result-row"><span class="result-label">目標達成の最大送り</span><span class="result-val">${maxFeed}<span class="result-unit">mm/rev</span></span></div>
+  `;
+}
+
+function calcRaInv() {
+  const sel = document.getElementById('rg-ra-sel').value;
+  const customWrap = document.getElementById('rg-ra-custom-wrap');
+  customWrap.style.display = sel === 'custom' ? '' : 'none';
+  const target = sel === 'custom'
+    ? parseFloat(document.getElementById('rg-ra-custom').value) || 1.6
+    : parseFloat(sel);
+  const noseR = parseFloat(document.getElementById('rg-noseR-inv').value) || 0.8;
+  const maxFeed = Math.sqrt(8 * noseR * target / 1000);
+  const grade = target <= 0.8 ? '鏡面仕上げ' : target <= 1.6 ? '▽▽▽▽ 精仕上げ' : target <= 3.2 ? '▽▽▽ 並仕上げ' : '▽▽ 荒仕上げ';
+  // ノーズRごとの最大送りも表示
+  const noseRs = [0.2, 0.4, 0.8, 1.2, 1.6, 2.0];
+  const rows = noseRs.map(r => {
+    const f = Math.sqrt(8 * r * target / 1000);
+    const active = Math.abs(r - noseR) < 0.01;
+    return `<tr style="${active?'background:var(--accent-l);font-weight:700':''}"><td>R${r}</td><td style="font-family:var(--mono);color:var(--accent)">f ≤ ${f.toFixed(3)}</td><td>mm/rev</td></tr>`;
+  }).join('');
+  document.getElementById('rough-inv-result').innerHTML = `
+    <div style="margin-bottom:10px"><strong>目標: Ra${target}μm（${grade}）</strong></div>
+    <div class="result-row"><span class="result-label">選択ノーズR(${noseR}mm)の最大送り</span><span class="result-val" style="color:var(--green)">${maxFeed.toFixed(3)}<span class="result-unit">mm/rev</span></span></div>
+    <div style="margin-top:12px;font-size:11px;color:var(--text2)">ノーズRごとの最大送り一覧:</div>
+    <table style="width:100%;font-size:12px;margin-top:4px;border-collapse:collapse">${rows}</table>
+    <div class="alert alert-info" style="margin-top:10px;font-size:11px">理論値。実際は送り×0.7〜0.8程度を目安にしてください。</div>
   `;
 }
 
