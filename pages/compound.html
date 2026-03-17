@@ -41,6 +41,8 @@ body{margin:0}
 .sc-body{display:none;border-top:1px solid var(--border);padding:10px}
 .tc-row{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px 10px;margin-bottom:6px;font-size:11px;color:var(--text2);display:flex;align-items:center;gap:6px}
 .tc-row code{color:var(--accent);font-family:var(--mono);font-size:11px}
+.flip-divider{border:2px dashed var(--amber);border-radius:var(--radius);margin-bottom:6px;background:var(--amber-l);padding:8px 12px;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;color:var(--amber)}
+.flip-divider .sact:hover{color:var(--red);background:var(--red-l)}
 .out-col{overflow-y:auto;display:flex;flex-direction:column;border-left:1px solid var(--border)}
 .out-top{background:var(--bg2);border-bottom:1px solid var(--border);padding:9px 12px;display:flex;align-items:center;gap:7px;flex-shrink:0;position:sticky;top:0;z-index:10}
 .out-top span{font-size:11px;font-weight:700;color:var(--text2);letter-spacing:1px;text-transform:uppercase}
@@ -94,6 +96,7 @@ body{margin:0}
   <div class="pi" draggable="true" ondragstart="pdrag(event,'mill')"><div class="pi-icon">⚙</div><div><div class="pi-name">フライス</div><div class="pi-tool">T0808</div></div></div>
   <div class="palette-section">特殊</div>
   <div class="pi" draggable="true" ondragstart="pdrag(event,'cutoff')"><div class="pi-icon">✂</div><div><div class="pi-name">突切り（完成）</div><div class="pi-tool">T0404</div></div></div>
+  <div class="pi" draggable="true" ondragstart="pdrag(event,'flip')" style="border-color:var(--amber);color:var(--amber)"><div class="pi-icon">🔃</div><div><div class="pi-name">反転チャック</div><div class="pi-tool" style="color:var(--amber)">M00停止</div></div></div>
 </div>
 
 <!-- ビルダー -->
@@ -129,6 +132,12 @@ body{margin:0}
       </select>
     </div>
     <div class="field"><label>サブプログラム開始番号</label><input type="number" id="sub-start" value="9001" min="9001" max="9999" style="width:80px"></div>
+    <div class="field"><label>反転加工方式</label>
+      <select id="flip-mode">
+        <option value="m00">M00（1プログラム）</option>
+        <option value="split">2ファイル分割</option>
+      </select>
+    </div>
   </div>
   <div class="steps-area" id="steps-area" ondragover="aOver(event)" ondrop="aDrop(event)" ondragleave="aLeave(event)">
     <div class="drop-hint" id="drop-hint">← パレットから工程をドラッグして追加<br><span style="font-size:11px;opacity:.6">追加後に各工程の詳細を入力</span></div>
@@ -139,9 +148,10 @@ body{margin:0}
 <div class="out-col">
   <div class="out-top">
     <span id="out-lbl">複合プログラム出力</span>
-    <div style="margin-left:auto;display:flex;gap:4px">
+    <div style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="doCopy()">コピー</button>
       <button class="btn btn-sm" onclick="doDL()">DL(.nc)</button>
+      <button class="btn btn-sm" id="dl2-btn" style="display:none;color:var(--amber);border-color:var(--amber)" onclick="doDL2()">DL 第2チャック</button>
       <button class="btn btn-sm" onclick="doPreview()">🖥 3D</button>
     </div>
   </div>
@@ -170,6 +180,7 @@ const DEFS={
   keyway:{name:'キー溝',      icon:'🔑',tool:'T0707',tname:'エンドミル'},
   mill:  {name:'フライス',    icon:'⚙',tool:'T0808',tname:'フライス'},
   cutoff:{name:'突切り(完成)',icon:'✂',tool:'T0404',tname:'突切りバイト'},
+  flip:  {name:'反転チャック',icon:'🔃',tool:null,tname:''},
 };
 const DEF_P={
   od:{blank_d:50,fin_d:45,fin_l:80,rpm:1000,feed:.2,depth:1.5},
@@ -182,6 +193,7 @@ const DEF_P={
   keyway:{w:6,d:3,l:40,td:6,rpm:800,feed:100},
   mill:{type:'平面フライス',td:10,w:50,d:3,rpm:1500,feed:200,ap:1},
   cutoff:{x:30,z:-80,rpm:500,feed:.04},
+  flip:  {},
 };
 
 let steps=[],idCnt=0,dragSrc=null,fromPalette=false,lastGcode='';
@@ -239,6 +251,18 @@ function render(){
   let prev=null;
   steps.forEach((s,i)=>{
     const def=DEFS[s.type];
+    // 反転チャックは特別カード
+    if(s.type==='flip'){
+      const card=document.createElement('div');card.className='flip-divider';card.id='sc-'+s.id;
+      const flipMode=document.getElementById('flip-mode')?.value||'m00';
+      card.innerHTML=`<span style="font-size:18px">🔃</span>
+        <div style="flex:1"><div>反転チャック（第${i+1}工程位置）</div>
+        <div style="font-size:10px;font-weight:400;margin-top:2px">${flipMode==='m00'?'M00でプログラム停止 → 手動反転 → スタートで再開':'ここで分割 → 別ファイルとして生成'}</div></div>
+        <button class="sact" onclick="removeStep(${s.id})" title="削除">✕</button>`;
+      area.appendChild(card);
+      prev=null; // 反転後は工具交換判定リセット
+      return;
+    }
     if(tcMode!=='none'&&prev&&prev!==def.tool){
       const tc=document.createElement('div');tc.className='tc-row';
       tc.innerHTML=tcMode==='auto'
@@ -328,38 +352,90 @@ function genSub(s,subNo){
     case 'mill':{const td=gp(p,'td',10),mw=gp(p,'w',50),md=gp(p,'d',3),rpm=gp(p,'rpm',1500),feed=gp(p,'feed',200),ap=gp(p,'ap',1);const ps=Math.ceil(md/ap);lines=[`(フライス 幅${mw}mm 深${md}mm)`,`G97 S${rpm} M03`,`T0808 M06`,`G43 H08`,`G00 X${-td}. Y0. Z5.`,`M08`];for(let i=1;i<=ps;i++){const cz=(-ap*i).toFixed(3);lines.push(`G01 Z${cz} F${Math.round(feed*.4)}`,`G01 X${mw+td}. F${feed}`,`G00 Z5.`,`X${-td}.`);}lines.push(`Z100.`,`M09`);summary=`フライス 幅${mw}mm 深${md}mm`;break;}
     case 'cutoff':{const x=gp(p,'x',30),z=gp(p,'z',-80),rpm=gp(p,'rpm',500),feed=gp(p,'feed',.04);lines=[`(突切り X${x}. Z${z}.)`,`G97 S${rpm} M03`,`T0404 M08`,`G00 X${x+2}. Z${z}.`,`G01 X0. F${feed}`,`G04 X0.5`,`G00 X${x+5}. Z100.`,`M09`];summary=`突切り X${x}mm`;break;}
     case 'face':{const dia=gp(p,'d',50),stock=gp(p,'stock',1),dep=gp(p,'depth',.5),fin=gp(p,'fin',.1),rpm=gp(p,'rpm',1000),feed=gp(p,'feed',.2),ffeed=gp(p,'ffeed',.08);const ps=Math.max(1,Math.ceil((stock-fin)/dep));lines=[`(端面仕上げ φ${dia}mm 取り代${stock}mm)`,`G50 S3000`,`G96 S${rpm} M03`,`T0101 M08`];for(let i=1;i<=ps;i++){const cz=(stock-dep*i).toFixed(3);lines.push(`G00 X${dia+2}. Z${cz}.`,`G01 X-1. F${feed}`,`G00 Z${stock}.`);}lines.push(`G00 X${dia+2}. Z0.`,`G01 X-1. F${ffeed}`,`G00 X${dia+10}. Z100.`,`M09`);summary=`端面 φ${dia}mm ${ps}パス+仕上げ`;break;}
+    case 'flip':{lines=[];summary='反転チャック';break;}
   }
   return{lines,summary};
 }
 
+let lastGcode2='';
 function buildAll(){
   if(!steps.length){showToast('工程を追加してください','error');return;}
   const progNo=parseInt(document.getElementById('prog-no').value)||1000;
   const mat=document.getElementById('mat-global').value;
   const tcMode=document.getElementById('tc-mode').value;
   const subStart=parseInt(document.getElementById('sub-start').value)||9001;
-  let mainLines=[`%`,`O${String(progNo).padStart(4,'0')}`,`(複合加工プログラム)`,`(素材: ${mat})`,`(工程数: ${steps.length})`,`G28 U0. W0.`,`G40 G80`];
-  let subs=[],expCards=[],prevTool=null;
-  steps.forEach((s,i)=>{
-    const def=DEFS[s.type],subNo=subStart+i;
-    const r=genSub(s,subNo);
-    if(tcMode!=='none'&&prevTool&&prevTool!==def.tool){
-      if(tcMode==='auto')mainLines.push(`(工具交換: ${prevTool}→${def.tool})`,`T0000`,`M06`,`${def.tool}`);
-      else mainLines.push(`(★工具交換: ${prevTool}→${def.tool} / ${def.tname})`);
-    }
-    prevTool=def.tool;
-    if(s.comment)mainLines.push(`(工程${i+1}: ${s.comment})`);
-    mainLines.push(`(工程${i+1}: ${def.name} - ${r.summary})`,`M98 P${subNo}`);
-    subs.push([``,`O${subNo} (${def.name})`,...r.lines,`G28 U0. W0.`,`M99`].join('\n'));
-    expCards.push({title:`工程${i+1}: ${def.icon} ${def.name}`,body:`サブ O${subNo} / ${def.tool} (${def.tname})<br>${r.summary}${s.comment?'<br>メモ: '+s.comment:''}`});
-  });
-  mainLines.push(`(全工程完了)`,`G28 U0. W0.`,`M05`,`M30`,``,`(======= サブプログラム =======)`);
-  const full=[...mainLines,...subs,`%`].join('\n');
+  const flipMode=document.getElementById('flip-mode').value;
+  const flipIdx=steps.findIndex(s=>s.type==='flip');
+  const hasFlip=flipIdx>=0;
+
+  // 工程を反転位置で分割（flipステップ自体は除く）
+  const group1=hasFlip?steps.slice(0,flipIdx):steps;
+  const group2=hasFlip?steps.slice(flipIdx+1):[];
+
+  function buildGroup(grp,pNo,subOff,label){
+    const machineSteps=grp.filter(s=>s.type!=='flip');
+    let mLines=[`%`,`O${String(pNo).padStart(4,'0')}`,`(複合加工プログラム${label})`,`(素材: ${mat})`,`(工程数: ${machineSteps.length})`,`G28 U0. W0.`,`G40 G80`];
+    let subs=[],expC=[],prev=null,subIdx=0;
+    machineSteps.forEach((s,i)=>{
+      const def=DEFS[s.type],subNo=subOff+subIdx++;
+      const r=genSub(s,subNo);
+      if(tcMode!=='none'&&prev&&prev!==def.tool){
+        if(tcMode==='auto')mLines.push(`(工具交換: ${prev}→${def.tool})`,`T0000`,`M06`,`${def.tool}`);
+        else mLines.push(`(★工具交換: ${prev}→${def.tool} / ${def.tname})`);
+      }
+      prev=def.tool;
+      if(s.comment)mLines.push(`(工程${i+1}: ${s.comment})`);
+      mLines.push(`(工程${i+1}: ${def.name} - ${r.summary})`,`M98 P${subNo}`);
+      subs.push([``,`O${subNo} (${def.name})`,...r.lines,`G28 U0. W0.`,`M99`].join('\n'));
+      expC.push({title:`工程${i+1}: ${def.icon} ${def.name}`,body:`サブ O${subNo} / ${def.tool} (${def.tname})<br>${r.summary}${s.comment?'<br>メモ: '+s.comment:''}`});
+    });
+    mLines.push(`(全工程完了)`,`G28 U0. W0.`,`M05`,`M30`,``,`(======= サブプログラム =======)`);
+    return{code:[...mLines,...subs,`%`].join('\n'),expCards:expC,count:machineSteps.length,subEnd:subOff+subIdx-1};
+  }
+
+  let full='',expCards=[];
+  lastGcode2='';
+  document.getElementById('dl2-btn').style.display='none';
+
+  if(!hasFlip||flipMode==='m00'){
+    // M00方式 or 反転なし: 1プログラムで反転ステップをM00に置換
+    const machineSteps=steps.filter(s=>s.type!=='flip');
+    let mLines=[`%`,`O${String(progNo).padStart(4,'0')}`,`(複合加工プログラム)`,`(素材: ${mat})`,`(工程数: ${machineSteps.length}${hasFlip?' 反転あり':''})`,`G28 U0. W0.`,`G40 G80`];
+    let subs=[],prev=null,subIdx=0,chuck=1;
+    steps.forEach((s,i)=>{
+      if(s.type==='flip'){
+        mLines.push(``,`(===== 第${++chuck}チャック ここで反転 =====)`,`G28 U0. W0.`,`M05 M09`,`M00`,`G28 U0. W0.`,``);
+        prev=null; return;
+      }
+      const def=DEFS[s.type],subNo=subStart+subIdx++;
+      const r=genSub(s,subNo);
+      if(tcMode!=='none'&&prev&&prev!==def.tool){
+        if(tcMode==='auto')mLines.push(`(工具交換: ${prev}→${def.tool})`,`T0000`,`M06`,`${def.tool}`);
+        else mLines.push(`(★工具交換: ${prev}→${def.tool} / ${def.tname})`);
+      }
+      prev=def.tool;
+      if(s.comment)mLines.push(`(工程: ${s.comment})`);
+      mLines.push(`(${def.name} - ${r.summary})`,`M98 P${subNo}`);
+      subs.push([``,`O${subNo} (${def.name})`,...r.lines,`G28 U0. W0.`,`M99`].join('\n'));
+      expCards.push({title:`工程${i+1}: ${def.icon} ${def.name}`,body:`サブ O${subNo} / ${def.tool||'-'} (${def.tname})<br>${r.summary}${s.comment?'<br>メモ: '+s.comment:''}`});
+    });
+    mLines.push(`(全工程完了)`,`G28 U0. W0.`,`M05`,`M30`,``,`(======= サブプログラム =======)`);
+    full=[...mLines,...subs,`%`].join('\n');
+  } else {
+    // 2ファイル分割
+    const r1=buildGroup(group1,progNo,subStart,'第1チャック');
+    const r2=buildGroup(group2,progNo+1,r1.subEnd+1,'第2チャック');
+    full=r1.code;
+    lastGcode2=r2.code;
+    expCards=[...r1.expCards,...r2.expCards];
+    document.getElementById('dl2-btn').style.display='';
+  }
   lastGcode=full;
 
   // プログラム情報
+  const machCount=steps.filter(s=>s.type!=='flip').length;
   const pi=document.getElementById('pinfo');pi.style.display='flex';
-  pi.innerHTML=`<span class="pinfo-chip">メイン: <b>O${String(progNo).padStart(4,'0')}</b></span><span class="pinfo-chip">工程数: <b>${steps.length}</b></span><span class="pinfo-chip">サブ: <b>O${subStart}〜O${subStart+steps.length-1}</b></span>`;
+  pi.innerHTML=`<span class="pinfo-chip">メイン: <b>O${String(progNo).padStart(4,'0')}</b></span><span class="pinfo-chip">加工工程: <b>${machCount}</b></span>${hasFlip?`<span class="pinfo-chip">${flipMode==='m00'?'🔃 M00反転':'🔃 2ファイル分割'}</span>`:''}`;
 
   // Gコード表示
   let n=1;
@@ -380,7 +456,8 @@ function buildAll(){
 
 function sOut(tab,btn){document.querySelectorAll('.out-tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');document.getElementById('out-gcode').style.display=tab==='gcode'?'flex':'none';document.getElementById('out-exp').style.display=tab==='exp'?'block':'none';}
 function doCopy(){if(!lastGcode){showToast('先に生成してください','error');return;}copyText(lastGcode);}
-function doDL(){if(!lastGcode){showToast('先に生成してください','error');return;}downloadText(lastGcode,`O${document.getElementById('prog-no').value||1000}_compound.nc`);}
+function doDL(){if(!lastGcode){showToast('先に生成してください','error');return;}const n=document.getElementById('prog-no').value||1000;downloadText(lastGcode,`O${n}_chuck1.nc`);}
+function doDL2(){if(!lastGcode2){showToast('2ファイル分割で生成してください','error');return;}const n=parseInt(document.getElementById('prog-no').value||1000)+1;downloadText(lastGcode2,`O${n}_chuck2.nc`);}
 function doPreview(){if(!lastGcode){showToast('先に生成してください','error');return;}sessionStorage.setItem('preview_gcode',lastGcode);sessionStorage.setItem('preview_source','複合加工');window.open('preview.html','_blank');}
 function saveToLog(){if(!lastGcode){showToast('先に生成してください','error');return;}const p=prompt('品番:','');if(!p)return;LOG_DB.add({partNo:p,procName:'複合加工 '+steps.length+'工程',material:document.getElementById('mat-global').value,gcode:lastGcode,memo:'複合加工ビルダーで生成'});showToast('実績に保存しました');}
 
