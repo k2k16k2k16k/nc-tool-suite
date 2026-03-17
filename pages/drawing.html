@@ -98,7 +98,7 @@
       <div style="background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px">
         <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:.5px">📁 JW_CADでのDXF保存ルール</div>
         <table style="width:100%;font-size:12px;border-collapse:collapse">
-          <tr><td style="padding:4px 0;color:var(--text2);width:90px">保存形式</td><td style="padding:4px 0;font-weight:700;color:var(--text)">R12/LT2形式 ★必須</td></tr>
+          <tr><td style="padding:4px 0;color:var(--text2);width:90px">保存形式</td><td style="padding:4px 0;font-weight:700;color:var(--text)">R12/LT2形式 推奨（R2000以降も読込可）</td></tr>
           <tr><td style="padding:4px 0;color:var(--text2)">単位</td><td style="padding:4px 0;color:var(--text)">mm統一（インチ不可）</td></tr>
           <tr><td style="padding:4px 0;color:var(--text2)">外形線レイヤー</td><td style="padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--green)">外形</td></tr>
           <tr><td style="padding:4px 0;color:var(--text2)">寸法レイヤー</td><td style="padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--green)">寸法</td></tr>
@@ -108,7 +108,7 @@
           <tr><td style="padding:4px 0;color:var(--text2)">ねじ表記</td><td style="padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--accent)">M20×1.5 または M20P1.5</td></tr>
         </table>
         <div style="margin-top:10px;padding:8px 10px;background:var(--amber-l);border-radius:var(--radius);font-size:11px;color:var(--amber)">
-          ⚠ 「DXF R2000以降」形式は読み取り精度が下がります。必ずR12/LT2を選択してください。
+          💡 R12/LT2形式が最も精度が高くなります。R2000以降も読み込めますが、寸法の自動検出精度が下がる場合があります。
         </div>
       </div>
 
@@ -210,7 +210,7 @@ if (localStorage.getItem('guide_open')) {
       <input type="file" id="dxf-file" accept=".dxf,.DXF" onchange="loadDXF(event)">
       <div class="upload-icon">📐</div>
       <div class="upload-title">DXFファイルをドロップ または クリック</div>
-      <div class="upload-sub">JW_CAD / AutoCAD の .dxf 形式に対応<br>保存時は「R12/LT2形式」推奨</div>
+      <div class="upload-sub">JW_CAD / AutoCAD の .dxf 形式に対応<br>R12/LT2推奨・R2000以降も読込可</div>
     </div>
     <div style="padding:0 16px 12px;text-align:center">
       <button class="btn btn-sm" onclick="loadSampleDXF()">📋 サンプル図面で試す</button>
