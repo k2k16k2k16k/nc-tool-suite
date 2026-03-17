@@ -577,8 +577,8 @@ function generate(proc) {
     const rpm=fv('kw-rpm',800),feed=fv('kw-feed',100);
     const passes=Math.ceil(kd/1.0);
     const lines=[`(キー溝 幅${kw}mm 深${kd}mm L${kl}mm)`,`%`,`O0006`,
-      `G28 G91 X0. Y0. Z0.`,`G90 G54`,`G17`,`T01 M06`,`G43 H01`,`G97 S${rpm} M03`,
-      `G00 X0. Y0. Z5.`,`M08`];
+      `G28 G91 X0. Y0. Z0.`,`G90 G54`,`G17`,`T01 M06`,`G43 H01 M08`,`G97 S${rpm} M03`,
+      `G00 X0. Y0. Z5.`];
     for(let i=1;i<=passes;i++){
       const cz=(-kd/passes*i).toFixed(3);
       lines.push(`G01 Z${cz} F${Math.round(feed*.3)}`,`G01 X${kl}. F${feed}`,`G00 Z5.`,`X0.`);
@@ -592,8 +592,8 @@ function generate(proc) {
     const rpm=fv('ml-rpm',1500),feed=fv('ml-feed',200),ap=fv('ml-ap',1);
     const passes=Math.ceil(md/ap);
     const lines=[`(${v('ml-type')} 幅${mw}mm 深${md}mm)`,`%`,`O0007`,
-      `G28 G91 X0. Y0. Z0.`,`G90 G54`,`G17`,`T01 M06`,`G43 H01`,`G97 S${rpm} M03`,
-      `G00 X${-td}. Y0. Z5.`,`M08`];
+      `G28 G91 X0. Y0. Z0.`,`G90 G54`,`G17`,`T01 M06`,`G43 H01 M08`,`G97 S${rpm} M03`,
+      `G00 X${-td}. Y0. Z5.`];
     for(let i=1;i<=passes;i++){
       const cz=(-ap*i).toFixed(3);
       lines.push(`G01 Z${cz} F${Math.round(feed*.4)}`,`G01 X${mw+td}. F${feed}`,`G00 Z5.`,`X${-td}.`);
